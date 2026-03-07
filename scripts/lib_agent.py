@@ -394,10 +394,13 @@ def execute_openclaw_task(
     run_id: str,
     timeout_multiplier: float,
     skill_dir: Path,
+    verbose: bool = False,
 ) -> Dict[str, Any]:
     logger.info("🤖 Agent [%s] starting task: %s", agent_id, task.task_id)
     logger.info("   Task: %s", task.name)
     logger.info("   Category: %s", task.category)
+    if verbose:
+        logger.info("   Prompt: %s", task.prompt[:500] + "..." if len(task.prompt) > 500 else task.prompt)
 
     # Clean up previous session transcripts so we can reliably find this task's
     # transcript (OpenClaw uses its own UUID-based naming, not our session ID).
@@ -453,6 +456,42 @@ def execute_openclaw_task(
         status = "error"
     if stderr and "openclaw command not found" in str(stderr):
         status = "error"
+
+    # Verbose logging for debugging
+    if verbose:
+        logger.info("   [VERBOSE] Exit code: %s", exit_code)
+        logger.info("   [VERBOSE] Execution time: %.2fs", execution_time)
+        logger.info("   [VERBOSE] Workspace: %s", workspace)
+        if stdout:
+            logger.info("   [VERBOSE] Stdout (first 1000 chars):\n%s", stdout[:1000])
+        if stderr:
+            logger.info("   [VERBOSE] Stderr:\n%s", stderr[:1000])
+        logger.info("   [VERBOSE] Transcript entries: %d", len(transcript))
+        
+        # Show agent responses from transcript
+        for entry in transcript:
+            if entry.get("type") == "message":
+                msg = entry.get("message", {})
+                role = msg.get("role", "unknown")
+                content = msg.get("content", "")
+                if role == "assistant":
+                    # Truncate long responses
+                    preview = content[:500] + "..." if len(content) > 500 else content
+                    logger.info("   [VERBOSE] Agent response: %s", preview)
+                elif role == "user":
+                    preview = content[:200] + "..." if len(content) > 200 else content
+                    logger.info("   [VERBOSE] User message: %s", preview)
+        
+        # Show workspace files after task
+        if workspace.exists():
+            logger.info("   [VERBOSE] Workspace files after task:")
+            for f in sorted(workspace.rglob("*")):
+                if f.is_file():
+                    try:
+                        size = f.stat().st_size
+                        logger.info("      %s (%d bytes)", f.relative_to(workspace), size)
+                    except OSError:
+                        logger.info("      %s", f.relative_to(workspace))
 
     return {
         "agent_id": agent_id,

@@ -212,6 +212,12 @@ def _parse_args() -> argparse.Namespace:
         default=1,
         help="Number of runs per task for averaging",
     )
+    parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Enable verbose logging (shows transcript contents, workspace files, etc.)",
+    )
     return parser.parse_args()
 
 
@@ -387,6 +393,7 @@ def main():
                     run_id=f"{run_id}-{run_index + 1}",
                     timeout_multiplier=args.timeout_multiplier,
                     skill_dir=skill_dir,
+                    verbose=args.verbose,
                 )
             except Exception as exc:
                 execution_error = str(exc)
@@ -407,7 +414,7 @@ def main():
                     "stderr": execution_error,
                 }
             try:
-                grade = grade_task(task=task, execution_result=result, skill_dir=skill_dir)
+                grade = grade_task(task=task, execution_result=result, skill_dir=skill_dir, verbose=args.verbose)
             except Exception as exc:
                 if execution_error:
                     note = f"Execution failed: {execution_error}; Grading failed: {exc}"

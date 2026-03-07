@@ -178,6 +178,7 @@ jobs:
             --suite "$BENCHMARK_SUITE" \
             --runs 1 \
             --output-dir results \
+            --verbose \
             $UPLOAD_FLAG
           
           # Find the results file and compute a hash for unique artifact naming

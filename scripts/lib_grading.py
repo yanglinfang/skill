@@ -51,21 +51,33 @@ def grade_task(
     judge_model: str = DEFAULT_JUDGE_MODEL,
     judge_agent_prefix: str = DEFAULT_JUDGE_AGENT_PREFIX,
     judge_timeout_seconds: float = DEFAULT_JUDGE_TIMEOUT_SECONDS,
+    verbose: bool = False,
 ) -> GradeResult:
     grading_type = task.grading_type
+    if verbose:
+        logger.info("   [VERBOSE] Grading task %s with type: %s", task.task_id, grading_type)
+        logger.info("   [VERBOSE] Execution status: %s", execution_result.get("status", "unknown"))
+    
     if grading_type == "automated":
-        return _grade_automated(task, execution_result)
+        result = _grade_automated(task, execution_result, verbose=verbose)
+        if verbose:
+            logger.info("   [VERBOSE] Automated grade breakdown: %s", result.breakdown)
+        return result
     if grading_type == "llm_judge":
-        return _grade_llm_judge(
+        result = _grade_llm_judge(
             task=task,
             execution_result=execution_result,
             judge_model=judge_model,
             judge_agent_prefix=judge_agent_prefix,
             judge_timeout_seconds=judge_timeout_seconds,
             skill_dir=skill_dir,
+            verbose=verbose,
         )
+        if verbose:
+            logger.info("   [VERBOSE] LLM judge breakdown: %s", result.breakdown)
+        return result
     if grading_type == "hybrid":
-        auto_result = _grade_automated(task, execution_result)
+        auto_result = _grade_automated(task, execution_result, verbose=verbose)
         llm_result = _grade_llm_judge(
             task=task,
             execution_result=execution_result,
@@ -73,12 +85,13 @@ def grade_task(
             judge_agent_prefix=judge_agent_prefix,
             judge_timeout_seconds=judge_timeout_seconds,
             skill_dir=skill_dir,
+            verbose=verbose,
         )
         return _combine_grades(task, auto_result, llm_result)
     raise ValueError(f"Unknown grading type: {grading_type}")
 
 
-def _grade_automated(task: Task, execution_result: Dict[str, Any]) -> GradeResult:
+def _grade_automated(task: Task, execution_result: Dict[str, Any], verbose: bool = False) -> GradeResult:
     grading_code = _extract_grading_code(task)
     if not grading_code:
         return GradeResult(
@@ -109,6 +122,9 @@ def _grade_automated(task: Task, execution_result: Dict[str, Any]) -> GradeResul
     )
     if not isinstance(scores, dict):
         scores = {}
+    
+    if verbose:
+        logger.info("   [VERBOSE] Automated grading scores: %s", scores)
 
     total = _average_scores(scores)
     return GradeResult(
@@ -129,8 +145,11 @@ def _grade_llm_judge(
     judge_agent_prefix: str,
     judge_timeout_seconds: float,
     skill_dir: Path,
+    verbose: bool = False,
 ) -> GradeResult:
     transcript_summary = _summarize_transcript(execution_result.get("transcript", []))
+    if verbose:
+        logger.info("   [VERBOSE] Transcript summary for judge (first 1000 chars):\n%s", transcript_summary[:1000])
     rubric = task.llm_judge_rubric or _format_grading_criteria(task)
     prompt = _build_judge_prompt(task, transcript_summary, rubric)
 
@@ -144,6 +163,8 @@ def _grade_llm_judge(
     )
 
     parsed = _parse_judge_response(judge_result.get("transcript", []))
+    if verbose:
+        logger.info("   [VERBOSE] Judge raw response parsed: %s", parsed)
     breakdown = parsed.get("scores", {})
     total = parsed.get("total")
     notes = parsed.get("notes", "")
