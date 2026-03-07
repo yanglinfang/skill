@@ -164,8 +164,8 @@ jobs:
           RESULTS_FILE=$(ls -t results/*.json | head -1)
           echo "results_file=$RESULTS_FILE" >> $GITHUB_OUTPUT
           
-          # Create a unique artifact name using model name (sanitized)
-          SAFE_MODEL=$(echo "$BENCHMARK_MODEL" | tr '/' '-')
+          # Create artifact name - sanitize chars invalid for GitHub artifacts (: / etc)
+          SAFE_MODEL=$(echo "$BENCHMARK_MODEL" | tr '/:' '--')
           echo "artifact_name=results-${SAFE_MODEL}-${{ github.run_id }}" >> $GITHUB_OUTPUT
 
       - name: Upload results artifact
