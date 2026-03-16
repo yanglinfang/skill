@@ -20,7 +20,7 @@ MAX_OPENCLAW_MESSAGE_CHARS = int(os.environ.get("PINCHBENCH_MAX_MSG_CHARS", "400
 
 
 def slugify_model(model_id: str) -> str:
-    return model_id.replace("/", "-").replace(".", "-")
+    return model_id.replace("/", "-").replace(".", "-").lower()
 
 
 

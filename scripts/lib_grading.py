@@ -421,6 +421,8 @@ def _normalize_judge_response(parsed: Dict[str, Any]) -> Dict[str, Any]:
         result["total"] = float(parsed["total"]) if isinstance(parsed["total"], (int, float)) else None
     elif "score" in parsed and isinstance(parsed["score"], (int, float)):
         result["total"] = float(parsed["score"])
+    elif "overall_score" in parsed and isinstance(parsed["overall_score"], (int, float)):
+        result["total"] = float(parsed["overall_score"])
     elif result["scores"]:
         # Calculate average if we have individual scores but no total
         values = [v for v in result["scores"].values() if isinstance(v, (int, float))]
