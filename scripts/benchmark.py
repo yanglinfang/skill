@@ -576,6 +576,9 @@ def main():
     grades_by_task_id = {}
     sanity_task_id = "task_00_sanity"
 
+    # No tasks excluded — all 23 tasks are evaluable with full ZeroClaw setup.
+    # task_21 (OpenClaw comprehension) tests PDF reading, not framework-specific knowledge.
+
     tasks_to_run = runner.tasks
     if task_ids is not None:
         tasks_to_run = [task for task in runner.tasks if task.task_id in task_ids]
