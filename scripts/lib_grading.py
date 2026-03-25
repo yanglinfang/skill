@@ -147,7 +147,10 @@ def _grade_llm_judge(
     skill_dir: Path,
     verbose: bool = False,
 ) -> GradeResult:
-    transcript_summary = _summarize_transcript(execution_result.get("transcript", []))
+    transcript_summary = _summarize_transcript(
+        execution_result.get("transcript", []),
+        workspace_path=execution_result.get("workspace"),
+    )
     if verbose:
         logger.info("   [VERBOSE] Transcript summary for judge (first 1000 chars):\n%s", transcript_summary[:1000])
     rubric = task.llm_judge_rubric or _format_grading_criteria(task)
@@ -242,28 +245,61 @@ def _format_grading_criteria(task: Task) -> str:
     return "\n".join(f"- {criterion}" for criterion in task.grading_criteria)
 
 
-def _summarize_transcript(transcript: List[Dict[str, Any]]) -> str:
+def _summarize_transcript(transcript: List[Dict[str, Any]], workspace_path: str | None = None) -> str:
     summary_parts: List[str] = []
     for event in transcript:
         if event.get("type") != "message":
             continue
         msg = event.get("message", {})
         role = msg.get("role")
+        content = msg.get("content", "")
         if role == "assistant":
-            for item in msg.get("content", []):
-                if item.get("type") == "toolCall":
-                    summary_parts.append(
-                        f"Tool: {item.get('name')}({json.dumps(item.get('arguments', {}))})"
-                    )
+            # Handle string content (ZeroClaw) or list-of-objects (OpenClaw)
+            if isinstance(content, str):
+                if content:
+                    summary_parts.append(f"Assistant: {content}")
+            elif isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict) and item.get("type") == "toolCall":
+                        summary_parts.append(
+                            f"Tool: {item.get('name')}({json.dumps(item.get('arguments', {}))})"
+                        )
+                    elif isinstance(item, dict) and item.get("type") == "text":
+                        summary_parts.append(f"Assistant: {item.get('text', '')}")
         elif role == "toolResult":
-            content = msg.get("content", [])
-            if content:
+            if isinstance(content, str):
+                summary_parts.append(f"Result: {content[:200]}")
+            elif isinstance(content, list) and content:
                 result_preview = str(content[0])[:200]
                 summary_parts.append(f"Result: {result_preview}")
         elif role == "user":
-            content = msg.get("content", [])
-            if content:
+            if isinstance(content, str):
+                summary_parts.append(f"User: {content}")
+            elif isinstance(content, list) and content:
                 summary_parts.append(f"User: {content[0]}")
+
+    # Append workspace file contents so the judge can evaluate output quality
+    if workspace_path:
+        ws = Path(workspace_path)
+        if ws.exists():
+            text_extensions = {".txt", ".md", ".py", ".ics", ".json", ".csv", ".html", ".yaml", ".yml", ".toml", ".cfg", ".ini"}
+            for f in sorted(ws.rglob("*")):
+                if not f.is_file():
+                    continue
+                # Skip ZeroClaw internal state files
+                rel = f.relative_to(ws)
+                if str(rel).startswith((".", "memory/", "state/", "cron/", "sessions/")):
+                    continue
+                if f.suffix.lower() in text_extensions:
+                    try:
+                        content_text = f.read_text(encoding="utf-8", errors="replace")
+                        # Truncate large files
+                        if len(content_text) > 3000:
+                            content_text = content_text[:3000] + "\n... (truncated)"
+                        summary_parts.append(f"\n--- File: {rel} ---\n{content_text}")
+                    except OSError:
+                        pass
+
     return "\n".join(summary_parts)
 
 
@@ -309,9 +345,17 @@ def _parse_judge_response(transcript: List[Dict[str, Any]]) -> Dict[str, Any]:
         msg = event.get("message", {})
         if msg.get("role") != "assistant":
             continue
-        for item in msg.get("content", []):
-            if item.get("type") == "text":
-                content_chunks.append(item.get("text", ""))
+        content = msg.get("content", "")
+        # Handle both string content (ZeroClaw) and list-of-objects content (OpenClaw)
+        if isinstance(content, str):
+            if content:
+                content_chunks.append(content)
+        elif isinstance(content, list):
+            for item in content:
+                if isinstance(item, dict) and item.get("type") == "text":
+                    content_chunks.append(item.get("text", ""))
+                elif isinstance(item, str):
+                    content_chunks.append(item)
     raw_text = "\n".join(content_chunks).strip()
     if not raw_text:
         return {}

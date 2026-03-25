@@ -382,6 +382,45 @@ def execute_openclaw_task(
     }
 
 
+def _call_openrouter_direct(prompt: str, model: str, timeout_seconds: float) -> str:
+    """Call OpenRouter API directly (no ZeroClaw). Used for LLM judge."""
+    api_key = os.environ.get("OPENROUTER_API_KEY") or os.environ.get("API_KEY", "")
+    if not api_key:
+        return "[Error] No API key set (OPENROUTER_API_KEY or API_KEY)"
+
+    # Strip openrouter/ prefix if present
+    bare_model = model
+    if bare_model.startswith("openrouter/"):
+        bare_model = bare_model[len("openrouter/"):]
+
+    url = "https://openrouter.ai/api/v1/chat/completions"
+    payload = json.dumps({
+        "model": bare_model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.0,
+    }).encode("utf-8")
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+        "HTTP-Referer": "https://pinchbench.com",
+        "X-Title": "PinchBench-Judge",
+    }
+
+    req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
+            data = json.loads(resp.read())
+            choices = data.get("choices", [])
+            if choices:
+                return choices[0].get("message", {}).get("content", "")
+            return "[Error] No choices in response"
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")
+        return f"[HTTP {e.code}] {body}"
+    except Exception as e:
+        return f"[Error] {e}"
+
+
 def run_openclaw_prompt(
     *,
     agent_id: str,
@@ -389,11 +428,28 @@ def run_openclaw_prompt(
     workspace: Path,
     timeout_seconds: float,
 ) -> Dict[str, Any]:
-    """Run a single prompt for helper agents like the judge."""
+    """Run a single prompt for helper agents like the judge.
+
+    Calls OpenRouter directly (not through ZeroClaw) since the judge
+    doesn't need tools — just text-in, text-out evaluation. The model
+    is extracted from the agent_id (e.g. 'bench-judge-anthropic-claude-sonnet-4-6').
+    """
     start_time = time.time()
     workspace.mkdir(parents=True, exist_ok=True)
 
-    response_text = _send_to_zeroclaw(prompt, timeout_seconds)
+    # Extract model from agent_id: bench-judge-{model_slug}
+    # The judge agent_id format is "{prefix}-{slugified_model}"
+    # We need the original model ID, which we reconstruct or use a fallback.
+    # The grading module passes the model via ensure_agent_exists, but we
+    # can't recover it from the slug reliably. Instead, send through ZeroClaw
+    # for the default model, or use direct OpenRouter if JUDGE_MODEL is set.
+    judge_model = os.environ.get("PINCHBENCH_JUDGE_MODEL", "")
+    if judge_model:
+        response_text = _call_openrouter_direct(prompt, judge_model, timeout_seconds)
+    else:
+        # Fallback: use ZeroClaw webhook (uses whatever model is configured)
+        response_text = _send_to_zeroclaw(prompt, timeout_seconds)
+
     transcript = _build_transcript(prompt, response_text)
     execution_time = time.time() - start_time
 
