@@ -165,17 +165,24 @@ def _send_to_zeroclaw(message: str, timeout_seconds: float) -> str:
 
 
 def _build_transcript(prompt: str, response: str) -> List[Dict[str, Any]]:
-    """Build a PinchBench-compatible transcript from a prompt/response pair."""
+    """Build a PinchBench-compatible transcript from a prompt/response pair.
+
+    Content is formatted as a list of typed objects to match the OpenClaw
+    transcript schema that PinchBench grading functions expect.
+    """
     return [
         {
             "type": "message",
-            "message": {"role": "user", "content": prompt},
+            "message": {
+                "role": "user",
+                "content": [{"type": "text", "text": prompt}],
+            },
         },
         {
             "type": "message",
             "message": {
                 "role": "assistant",
-                "content": response,
+                "content": [{"type": "text", "text": response}],
             },
         },
     ]
@@ -227,7 +234,7 @@ def prepare_task_workspace(skill_dir: Path, run_id: str, task: Task, agent_id: s
     for item in list(workspace.iterdir()):
         name = item.name
         # Keep ZeroClaw internal state
-        if name.startswith(".") or name in ("memory", "state", "cron", "sessions", "skills"):
+        if name.startswith(".") or name in ("memory", "state", "cron", "sessions", "skills", "images"):
             continue
         if name.endswith(".db") or name.endswith(".db-wal") or name.endswith(".db-shm"):
             continue
@@ -252,15 +259,15 @@ def prepare_task_workspace(skill_dir: Path, run_id: str, task: Task, agent_id: s
             logger.error("Workspace file not found: %s", source)
             raise
 
-    # Remove bootstrap files that interfere with benchmark tasks
-    for bootstrap_file in ["BOOTSTRAP.md", "SOUL.md", "USER.md", "IDENTITY.md"]:
+    # Remove bootstrap files that could confuse the benchmark.
+    # Keep IDENTITY.md and SOUL.md — they provide useful agent context.
+    for bootstrap_file in ["BOOTSTRAP.md", "USER.md"]:
         bootstrap_path = workspace / bootstrap_file
         if bootstrap_path.exists():
             try:
                 bootstrap_path.unlink()
-                logger.info("Removed bootstrap file: %s", bootstrap_file)
-            except OSError as exc:
-                logger.warning("Failed to remove %s: %s", bootstrap_file, exc)
+            except OSError:
+                pass
 
     return workspace
 
@@ -285,6 +292,11 @@ def execute_openclaw_task(
 
     start_time = time.time()
     workspace = prepare_task_workspace(skill_dir, run_id, task, agent_id)
+    if verbose and task.workspace_files:
+        fixture_files = list(workspace.rglob("*"))
+        fixture_files = [f for f in fixture_files if f.is_file() and not f.name.endswith(".db")]
+        logger.info("   [VERBOSE] Workspace fixtures after setup: %s",
+                     [str(f.relative_to(workspace)) for f in fixture_files[:20]])
     timeout_seconds = task.timeout_seconds * timeout_multiplier
     timed_out = False
     transcript: List[Dict[str, Any]] = []
